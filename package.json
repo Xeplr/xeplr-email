@@ -1,0 +1,16 @@
+{
+  "name": "@xeplr/email",
+  "version": "1.0.0",
+  "description": "Internal email HTTP API — lightweight server wrapping xeplr-utils email providers",
+  "main": "index.js",
+  "files": ["index.js", "lib/"],
+  "keywords": ["email", "http", "internal", "smtp", "ses", "brevo"],
+  "author": "xeplr",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/xeplr/xeplr" },
+  "publishConfig": { "access": "public" },
+  "dependencies": {
+    "@xeplr/base-apis": "^1.0.0",
+    "@xeplr/utils": "^1.0.0"
+  }
+}
