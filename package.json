@@ -7,7 +7,7 @@
   "keywords": ["email", "http", "internal", "smtp", "ses", "brevo"],
   "author": "xeplr",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/xeplr/xeplr" },
+  "repository": { "type": "git", "url": "https://github.com/Xeplr/xeplr-email" },
   "publishConfig": { "access": "public" },
   "dependencies": {
     "@xeplr/base-apis": "^1.0.0",
