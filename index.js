@@ -102,8 +102,29 @@ function start(config = {}) {
   return httpFactory.init(port, 'xeplr-email', emailHandler);
 }
 
+// Env vars this library needs (Brevo provider). Apps that send email spread
+// this into their env.required.js — names owned here, not re-listed per app.
+var requiredEnv = ['EMAIL_PROVIDER', 'BREVO_API_KEY', 'BREVO_FROM_EMAIL', 'BREVO_FROM_NAME'];
+
+/**
+ * Configure the email provider from the environment — reads process.env (NOT a
+ * .env file; the consumer app loads that). So no app/lib hand-wires email:
+ * call this once at boot and everything that uses @xeplr/utils sendEmail (auth,
+ * jobs, …) is ready. No-op + returns false if EMAIL_PROVIDER isn't set.
+ */
+function configureFromEnv() {
+  // Single source for env→email config lives in @xeplr/utils. Here we reuse it,
+  // then run it through init() so the wrapper's queue/health extras apply too.
+  var config = require('@xeplr/utils').emailConfigFromEnv();
+  if (!config) return false;
+  init(config);
+  return true;
+}
+
 module.exports = {
+  requiredEnv,
   init,
+  configureFromEnv,
   start,
   send,
   isHealthy
