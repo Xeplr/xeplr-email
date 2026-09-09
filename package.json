@@ -1,11 +1,13 @@
 {
   "name": "@xeplr/email",
   "version": "1.0.1",
-  "description": "Internal email HTTP API — lightweight server wrapping xeplr-utils email providers",
+  "description": "Internal email HTTP API \u2014 lightweight server wrapping xeplr-utils email providers",
   "main": "index.js",
   "files": [
     "index.js",
-    "lib/"
+    "lib/",
+    "models/",
+    "migrations/"
   ],
   "keywords": [
     "email",
@@ -26,6 +28,10 @@
   },
   "dependencies": {
     "@xeplr/base-apis": "^1.0.0",
-    "@xeplr/utils": "^1.0.0"
+    "@xeplr/utils": "^1.0.0",
+    "@xeplr/db": "^1.0.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
   }
 }

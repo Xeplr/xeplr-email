@@ -2,6 +2,12 @@ const { configureEmail, sendEmail } = require('@xeplr/utils');
 const Queue = require('@xeplr/utils/lib/queue');
 const { http: httpFactory } = require('@xeplr/base-apis');
 const emailHandler = require('./lib/emailHandler');
+// The TEMPLATE STORE — this service's own database. Required lazily inside
+// initTemplates so an install that only sends mail never needs @xeplr/db or a
+// database at all; everything below it is unchanged and still works with no
+// templates configured.
+let _templatesDb = null;
+let _templates = null;
 
 var _queue = null;
 var _healthy = false;
@@ -54,6 +60,8 @@ async function _sendTestEmail() {
     _healthy = true;
   } catch (err) {
     _healthy = false;
+    console.error('[email] health check FAILED — could not send test mail to ' +
+      _testTo + ': ' + (err && err.message ? err.message : err));
   }
 }
 
@@ -104,7 +112,39 @@ function start(config = {}) {
 
 // Env vars this library needs (Brevo provider). Apps that send email spread
 // this into their env.required.js — names owned here, not re-listed per app.
-var requiredEnv = ['EMAIL_PROVIDER', 'BREVO_API_KEY', 'BREVO_FROM_EMAIL', 'BREVO_FROM_NAME'];
+// WHICH vars are mandatory depends on the PROVIDER. A fixed BREVO_* list
+// refused to boot an install running on SMTP, over credentials it never uses
+// — and the reverse would wave through a real misconfiguration. Only the
+// providers emailConfigFromEnv actually builds a config for are listed;
+// anything else needs EMAIL_PROVIDER alone.
+//
+// Read at ACCESS time (see the getter on module.exports, not a constant): a
+// consumer loads its .env and only then requires env.required.js, so the
+// provider is not known when this module is first evaluated.
+var providerRequiredEnv = {
+  brevo: ['BREVO_API_KEY', 'BREVO_FROM_EMAIL', 'BREVO_FROM_NAME'],
+  // SMTP_PORT is deliberately absent — it defaults to 587 (STARTTLS), which
+  // is a protocol default, not a guess at where data lives.
+  smtp: ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM']
+};
+
+function requiredEnvFor(provider) {
+  var extra = providerRequiredEnv[String(provider || '').toLowerCase()] || [];
+  return ['EMAIL_PROVIDER'].concat(extra);
+}
+
+// SENDING mail and STORING templates are two different capabilities, so they
+// are two different lists. Most apps only send — they need a provider and no
+// database at all (see the note at the top of this file). Only an app that
+// calls initTemplates() needs a store, and only that app spreads this:
+//
+//   ...require('@xeplr/email').templatesRequiredEnv,   // EMAIL_DB_NAME
+//
+// Required with no default because TEMPLATES ARE APP-SPECIFIC — a
+// registration mail is written for one product's wording and branding. One
+// shared store would mean two apps overwriting each other's template of the
+// same name, so each app owns its own (see lib/db.js).
+var templatesRequiredEnv = ['EMAIL_DB_NAME'];
 
 /**
  * Configure the email provider from the environment — reads process.env (NOT a
@@ -121,11 +161,62 @@ function configureFromEnv() {
   return true;
 }
 
+/**
+ * Bring up the template store: connect, create `xeplr_email` if absent, run
+ * migrations. Call once at boot IF you want templates — sending works without
+ * it, so an install that does not use templates configures nothing.
+ *
+ * Connection comes from the shared XEPLR_DB_CONNECTION (override with
+ * EMAIL_DB_CONNECTION_INFO_ENCRYPTED). Database name is fixed at xeplr_email.
+ */
+async function initTemplates(config) {
+  _templatesDb = require('./lib/db');
+  _templates = require('./lib/templates');
+  await _templatesDb.ready(config);
+  return _templates;
+}
+
+/** Express router for template CRUD + preview. Mount after initTemplates(). */
+function templatesRouter(config) {
+  return require('./lib/templatesRouter')(config);
+}
+
+/**
+ * Render a stored template into { subject, html, text }.
+ * Throws EMAIL_TEMPLATE_NOT_FOUND / EMAIL_TEMPLATE_MISSING_VARS.
+ */
+async function renderTemplate(name, variables, opts) {
+  if (!_templates) throw new Error('email: call initTemplates() before renderTemplate().');
+  return _templates.render(name, variables, opts);
+}
+
+/** Send a stored template — render, then hand to the configured provider. */
+async function sendTemplate(name, to, variables, opts) {
+  const rendered = await renderTemplate(name, variables, opts);
+  return send(to, rendered.subject, rendered.html, (opts || {}).cc, (opts || {}).attachments);
+}
+
+function templatesReady() {
+  return Boolean(_templatesDb && _templatesDb.isInitialised());
+}
+
 module.exports = {
-  requiredEnv,
+  templatesRequiredEnv,
+  initTemplates,
+  templatesRouter,
+  renderTemplate,
+  sendTemplate,
+  templatesReady,
   init,
   configureFromEnv,
   start,
   send,
   isHealthy
 };
+
+// A getter, so `...require('@xeplr/email').requiredEnv` reflects the provider
+// the consumer configured rather than whatever was set when this file loaded.
+Object.defineProperty(module.exports, 'requiredEnv', {
+  enumerable: true,
+  get: function () { return requiredEnvFor(process.env.EMAIL_PROVIDER); }
+});
