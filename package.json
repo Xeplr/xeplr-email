@@ -1,7 +1,7 @@
 {
   "name": "@xeplr/email",
   "version": "1.0.6",
-  "description": "Internal email HTTP API — lightweight server wrapping xeplr-utils email providers",
+  "description": "Email for xeplr apps — SMTP, AWS SES, Azure or Brevo, sent in-process or over HTTP, with an optional queue and a template store",
   "main": "index.js",
   "files": [
     "index.js",
