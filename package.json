@@ -1,6 +1,6 @@
 {
   "name": "@xeplr/email",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Email for xeplr apps — SMTP, AWS SES, Azure or Brevo, sent in-process or over HTTP, with an optional queue and a template store",
   "main": "index.js",
   "files": [
