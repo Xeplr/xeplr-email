@@ -1,7 +1,10 @@
 const { configureEmail, sendEmail } = require('@xeplr/utils');
 const Queue = require('@xeplr/utils/lib/queue');
-const { http: httpFactory } = require('@xeplr/base-apis');
+// The PLAIN Node HTTP server (no Express, no auth gate) — base-apis 2.x
+// exports it as createHttpServer; 1.x called it `http`.
+const { createHttpServer: httpFactory } = require('@xeplr/base-apis');
 const emailHandler = require('./lib/emailHandler');
+const controlling = require('./lib/controlling');
 // The TEMPLATE STORE — this service's own database. Required lazily inside
 // initTemplates so an install that only sends mail never needs @xeplr/db or a
 // database at all; everything below it is unchanged and still works with no
@@ -12,6 +15,7 @@ let _templates = null;
 var _queue = null;
 var _healthy = false;
 var _testTo = null;
+var _allowRules = null;
 
 /**
  * Initialize xeplr-email (configure the email provider).
@@ -26,8 +30,13 @@ var _testTo = null;
  * @param {object} [config.aws] - { region, accessKeyId, secretAccessKey, from }
  * @param {object} [config.azure] - { connectionString, from }
  * @param {object} [config.brevo] - { apiKey, fromEmail, fromName }
+ * @param {object} [config.allow] - The body pattern POST /internal/send accepts
+ *   (lib/controlling.js). Falls back to EMAIL_ALLOW; unset, every send is accepted.
  */
 function init(config = {}) {
+  // First, so a malformed rule stops the boot before anything is configured.
+  _allowRules = config.allow ? controlling.compileRules(config.allow) : controlling.fromEnv();
+
   if (config.provider) {
     configureEmail(config);
   }
@@ -72,6 +81,11 @@ function isHealthy() {
   return _healthy;
 }
 
+/** The compiled body rules /internal/send checks against, or null when off. */
+function getAllowRules() {
+  return _allowRules;
+}
+
 /**
  * Send an email. If useQueue is enabled, queues the email for later delivery.
  *
@@ -108,6 +122,64 @@ function start(config = {}) {
 
   var port = config.port || process.env.EMAIL_PORT || 19007;
   return httpFactory.init(port, 'xeplr-email', emailHandler);
+}
+
+/**
+ * Start the PUBLIC email service — what a website's forms reach. A separate
+ * process from start(): this one never takes a recipient, a subject or HTML
+ * from a request, only a form's key and its field values; the forms
+ * themselves are config (lib/public/forms.js). Never point a website at
+ * start()'s /internal/send.
+ *
+ * @param {object} config
+ * @param {object} config.forms - { key: { to, subject, fields, origins, limits, … } }
+ * @param {number|string} [config.port] - default EMAIL_PUBLIC_PORT or 19008
+ * @param {string} [config.host] - default EMAIL_PUBLIC_HOST or 127.0.0.1: only nginx on the same
+ *   machine reaches it. Anything wider lets a caller skip nginx and claim any X-Real-IP
+ * @param {number} [config.maxBodyBytes=10240] - a larger request is refused (413)
+ * @param {boolean} [config.trustProxy=false] - behind nginx: read the visitor's address from X-Real-IP
+ * @param {boolean} [config.dryRun=false] - log each mail instead of sending it
+ * @param {object} [config.tokens] - form tokens: { ttlSeconds=3600, minSeconds=3, perIpPerHour=30 }.
+ *   The signing secret comes from EMAIL_PUBLIC_TOKEN_SECRET; unset, a new one each start (lib/public/formToken.js)
+ * @param {string} [config.provider] - and its settings, as for init(); omitted, the provider comes from the environment
+ * @returns {http.Server}
+ */
+function startPublic(config = {}) {
+  var { loadForms } = require('./lib/public/forms');
+  var { createPublicHandler } = require('./lib/public/handler');
+  var forms = loadForms(config);   // a bad form stops the boot, naming it
+
+  if (config.provider) {
+    init(config);
+  } else if (!configureFromEnv() && !config.dryRun) {
+    throw new Error('email public: no provider — set EMAIL_PROVIDER and its settings, or pass config.provider. Nothing would ever be sent.');
+  }
+
+  var port = config.port || process.env.EMAIL_PUBLIC_PORT || 19008;
+  var handler = createPublicHandler({
+    forms: forms,
+    // Read through module.exports so a test (or an app) can replace send().
+    send: function(to, subject, html) { return module.exports.send(to, subject, html); },
+    maxBodyBytes: config.maxBodyBytes,
+    trustProxy: config.trustProxy,
+    dryRun: config.dryRun,
+    log: config.log,
+    // The secret never goes in forms.json, which sits beside a website's code.
+    tokens: Object.assign({}, config.tokens, { secret: process.env.EMAIL_PUBLIC_TOKEN_SECRET || undefined })
+  });
+  var host = config.host || process.env.EMAIL_PUBLIC_HOST || '127.0.0.1';
+  console.log('[email-public] forms: ' + Object.keys(forms).join(', ') + (config.dryRun ? ' (DRY RUN — nothing is sent)' : ''));
+  // Its own plain server rather than base-apis', which listens on every
+  // address and takes no host. This one must not: see config.host.
+  var server = require('http').createServer(handler);
+  server.on('error', function(err) {
+    if (err.code === 'EADDRINUSE') { console.error('[email-public] ' + host + ':' + port + ' is already in use'); process.exit(1); }
+    throw err;
+  });
+  server.listen(Number(port), host, function() {
+    console.log('[email-public] listening on ' + host + ':' + server.address().port);
+  });
+  return server;
 }
 
 // Env vars this library needs (Brevo provider). Apps that send email spread
@@ -210,8 +282,11 @@ module.exports = {
   init,
   configureFromEnv,
   start,
+  startPublic,
   send,
-  isHealthy
+  isHealthy,
+  getAllowRules,
+  controlling
 };
 
 // A getter, so `...require('@xeplr/email').requiredEnv` reflects the provider

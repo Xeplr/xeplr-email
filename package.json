@@ -7,7 +7,9 @@
     "index.js",
     "lib/",
     "models/",
-    "migrations/"
+    "migrations/",
+    "bin/",
+    "embed/"
   ],
   "keywords": [
     "email",
@@ -28,10 +30,17 @@
   },
   "dependencies": {
     "@xeplr/base-apis": "^2.0.0",
-    "@xeplr/utils": "^1.0.0",
-    "@xeplr/db": "^1.0.0"
+    "@xeplr/db": "^1.0.0",
+    "@xeplr/utils": "^1.0.0"
   },
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "build:embed": "esbuild embed/embed.js --minify --target=es2017 --legal-comments=inline --outfile=embed/embed.min.js"
+  },
+  "bin": {
+    "xeplr-email-public": "bin/xeplr-email-public.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }
